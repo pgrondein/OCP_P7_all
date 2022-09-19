@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[16]:
+# In[1]:
 
 
 import os, sys, time
@@ -35,6 +35,8 @@ from sklearn.metrics import roc_auc_score, roc_curve
 from sklearn.metrics import f1_score
 from sklearn.metrics import confusion_matrix
 from sklearn.metrics import make_scorer
+from sklearn.metrics import precision_score
+from sklearn.metrics import recall_score
 
 import lime
 import shap
@@ -51,132 +53,115 @@ warnings.filterwarnings(action = 'ignore')
 
 
 rs = 42
-df = pd.read_csv('data_clean.csv')
 
 # Séparation train/test
-train_df = df[df['TARGET'].notnull()]
-test_df = df[df['TARGET'].isnull()]
+train_df = pd.read_csv('df_train.csv').drop('Unnamed: 0', axis = 1)
+test_df = pd.read_csv('df_test.csv').drop('Unnamed: 0', axis = 1)
 
 feats = [f for f in train_df.columns if f not in ['TARGET','SK_ID_CURR','SK_ID_BUREAU','SK_ID_PREV','index']]
 
 X_train = train_df[feats]
 y_train = train_df['TARGET']
 
-scaler = MinMaxScaler()
-X_train = pd.DataFrame(data = scaler.fit_transform(X_train), 
-                       columns = X_train.columns, index = X_train.index)
-
-print("Starting LightGBM. Train shape: {}, test shape: {}".format(train_df.shape, test_df.shape))
-
-
-# In[3]:
-
-
-np.all(np.isfinite(train_df[feats]))
-
-
-# In[4]:
-
-
-np.all(np.isnan(train_df[feats]))
+X_test = test_df[feats]
+y_test = test_df['TARGET']
 
 
 # ## Functions
 
-# In[5]:
+# In[3]:
 
 
 def display_importances(feature_importance_df_, model):
     
     cols = feature_importance_df_[
-        ["feature", "importance"]].groupby("feature").mean().sort_values(
-        by = "importance", ascending = False)[:40].index
+           ["feature", "importance"]].groupby("feature").mean().sort_values(
+           by = "importance", ascending = False)[:40].index
     
     best_features = feature_importance_df_.loc[feature_importance_df_.feature.isin(cols)]
     
     plt.figure(figsize = (8, 10))
     sns.barplot(x = "importance", y = "feature", data = best_features.sort_values(by = "importance", 
                                                                                   ascending = False))
-    plt.title('LightGBM Features (avg over folds)')
+    plt.title('Features Importance')
     plt.tight_layout()
     plt.savefig('{}_importances.png'.format(model))
 
 
-# In[6]:
+# In[34]:
 
 
-def smote_pip_skfold(X_train, y_train, model, model_name, rs = 42) : 
+def model_app_train(X_train, y_train, model, model_name, grid, class_imb = 'CW', ybot = 0, ytop = 1, 
+                    n_fold = 5, n_fold_repeats = 5) : 
+     
     
-    temps1 = time.time()
+   # IMBALANCED CLASS METHOD
+    if class_imb == 'SMOTE' :
+        
+        oversample_model = SMOTE()   
+        steps = [
+        ('oversample', oversample_model), 
+        ('model', model)
+        ]
+        
+    if class_imb == 'CW' : 
+        
+        steps = [
+            ('model', model)
+        ]
     
-    # Define SMOTE version of the dataset
-    oversample_model = SMOTE(sampling_strategy = 'auto', 
-                             k_neighbors = 5)
-    
-    # Define a pipeline that first transform training set with SMOTE set then fits the model
-    steps = [('oversample', oversample_model), 
-             ('model', model)]
     pipeline = Pipeline(steps = steps)
     
-    # Define cross validation method
-    cv = RepeatedStratifiedKFold(n_splits = 5, 
-                                 n_repeats = 3, 
+    
+    # CROSS VALIDATION METHOD
+    cv = RepeatedStratifiedKFold(n_splits = n_fold, 
+                                 n_repeats = n_fold_repeats, 
                                  random_state = rs)
     
-    scores = cross_validate(pipeline, 
-                            X_train, y_train, 
+    model_cv = GridSearchCV(pipeline, 
+                            grid, 
                             cv = cv,
-                            scoring = ('roc_auc', 'f1'),
-                            return_train_score = False)
+                            scoring = 'roc_auc',
+                            refit = True)
+    best_model = model_cv.fit(X_train,y_train)
+        
+    cv_result = pd.DataFrame(data = model_cv.cv_results_)
+    cv_result.to_csv('cv_result_{}.csv'.format(model_name))
+
+    best_params = pd.DataFrame(data = model_cv.best_params_, index = [model_name])
+    best_params.to_csv('best_params_{}.csv'.format(model_name))
+        
+    b = n_fold * n_fold_repeats
+    best_i = model_cv.best_index_
+    auc = pd.DataFrame(columns = ['Fold', 'AUC'])
+        
+    for i in range (0, b) :
+        best_auc = model_cv.cv_results_['split{}_test_score'.format(i)][best_i]
+        auc = auc.append({'Fold' : i+1, 'AUC' : best_auc}, ignore_index = True)
     
-    print('Mean AUC: %.3f' % np.mean(scores['test_roc_auc']))
-    print('Mean F1 score: %.3f' % np.mean(scores['test_f1']))
-    
-    duration1 = time.time() - temps1
-    print("Computation time : ", "%15.2f" % duration1, "secondes")
-    
-    data_clf = pd.DataFrame(data = {'AUC' : np.mean(scores['test_roc_auc']), 
-                                    'F1' : np.mean(scores['test_f1']), 
-                                    'Computation time' : round(duration1, 0)}, 
-                             index = [model_name])
-    
-    
-    display(data_clf)
-    
-    return data_clf
+    print('Best parameters : ', model_cv.best_params_)
+    print('Mean computation time : %.3f secondes' % model_cv.refit_time_)
+    print('Mean AUC: %.3f' % model_cv.cv_results_['mean_test_score'][best_i])
+    print('Standard deviation AUC: %.3f' % model_cv.cv_results_['std_test_score'][best_i])
+              
+    boxplot(auc, 'Fold', 'AUC', ybot, ytop)
+
+    if model_name == 'Dummy_clf' :
+        return best_model
+    if model_name == 'LR_clf' :
+        coef = model_cv.best_estimator_.named_steps.model.coef_
+        feature_importance_df_ = pd.DataFrame(data = {'feature' : feats, 'importance' : coef[0]})
+        display_importances(feature_importance_df_ , model_name)
+        return best_model
+    if model_name == 'RF_clf' :
+        coef = model_cv.best_estimator_.named_steps.model.feature_importance_
+        feature_importance_df_ = pd.DataFrame(data = {'feature' : feats, 'importance' : coef})
+        display_importances(feature_importance_df_ , model_name)
+        return best_model
 
 
-# In[33]:
+# In[5]:
 
-
-def evaluate_model(model) : 
-    
-    folds = StratifiedKFold(n_splits = 5, 
-                            shuffle = True, 
-                            random_state = 1)
-    
-    predicted_targets = np.array([])
-    actual_targets = np.array([])
-    
-    train_df = df[df['TARGET'].notnull()]   
-    feats = [f for f in train_df.columns if f not in ['TARGET','SK_ID_CURR','SK_ID_BUREAU','SK_ID_PREV','index']]
-    
-    oversample_model = SMOTE(sampling_strategy = 'auto', 
-                             k_neighbors = 5)
-    
-    for n_fold, (train_idx, test_idx) in enumerate(folds.split(train_df[feats], train_df['TARGET'])):
-        train_x, train_y = train_df[feats].iloc[train_idx], train_df['TARGET'].iloc[train_idx]
-        test_x, test_y = train_df[feats].iloc[test_idx], train_df['TARGET'].iloc[test_idx]
-        
-        train_x, train_y = oversample_model.fit_resample(train_x, train_y)
-        
-        model.fit(train_x, train_y)
-        y_pred = model.predict(test_x)
-        
-        predicted_targets = np.append(predicted_targets, y_pred)
-        actual_targets = np.append(actual_targets, test_y)
-        
-    return predicted_targets, actual_targets
 
 def plot_confusion_matrix(predicted_labels_list, y_test_list):
     
@@ -192,13 +177,13 @@ def plot_confusion_matrix(predicted_labels_list, y_test_list):
                               title = 'Confusion matrix, without normalization')
     plt.show()
 
-    # Plot normalized confusion matrix
-    plt.figure(figsize = (8,8))
-    generate_confusion_matrix(cnf_matrix, 
-                              classes = class_names, 
-                              normalize = True, 
-                              title = 'Normalized confusion matrix')
-    plt.show()
+#     # Plot normalized confusion matrix
+#     plt.figure(figsize = (8,8))
+#     generate_confusion_matrix(cnf_matrix, 
+#                               classes = class_names, 
+#                               normalize = True, 
+#                               title = 'Normalized confusion matrix')
+#     plt.show()
         
 def generate_confusion_matrix(cnf_matrix, classes = feats, normalize = False, title = 'Confusion matrix'):
     
@@ -230,322 +215,187 @@ def generate_confusion_matrix(cnf_matrix, classes = feats, normalize = False, ti
     return cnf_matrix
 
 
+# In[17]:
+
+
+def boxplot(df, x_, y_, ybot, ytop):
+    
+    boxprops = dict(linestyle = '-', linewidth = 1, color = 'k')
+#     medianprops = dict(linestyle = '-', linewidth = 1, color = 'k')
+#     meanprops = dict(marker = 'D', markeredgecolor = 'black', markerfacecolor = 'firebrick')
+    sns.set_style("whitegrid")
+
+    plt.figure(figsize = (10, 8))
+
+    sns.boxplot(x = x_, 
+                y = y_, 
+                data = df, 
+                boxprops = boxprops, 
+                showfliers = True, 
+#                 medianprops = medianprops, 
+                showmeans = True, 
+#                 meanprops = meanprops
+               )
+
+    plt.title('AUC', fontsize = 30)
+    plt.ylim(ybot, ytop)
+    plt.xticks(fontsize = 15)
+    plt.yticks(fontsize = 15)
+    plt.xlabel('Fold', fontsize = 25)
+    plt.ylabel('AUC', fontsize = 25)
+    plt.show()
+
+
+# In[29]:
+
+
+def predict(model, model_name, X_test, y_test, average_recall = 'binary', average_prec = 'binary'):
+    
+    y_pred = model.predict(X_test)
+    y_score = model.predict_proba(X_test)[:,1]
+    
+    auc = roc_auc_score(y_test, y_score)
+#     print(auc)
+    f1 = f1_score(y_test, y_pred)
+#     print(f1)
+    recall = recall_score(y_test, y_pred, average = average_recall)
+#     print(recall)
+    prec = precision_score(y_test, y_pred, average = average_prec)
+#     print(prec)
+    
+    predict = pd.DataFrame({'AUC' : round(auc, 2), 
+                            'F1' : round(f1, 2), 
+                            'Recall score' : round(recall, 2), 
+                            'Precision' : round(prec, 2)}, 
+                           index = [model_name])
+    display(predict)
+    
+    plot_confusion_matrix(y_pred, y_test)
+    
+    return predict
+
+
 # # Models
 
 # ## Dummy Classifier
 
-# In[85]:
+# In[35]:
 
 
 # Model definition
 dum = DummyClassifier(strategy = "most_frequent")
+grid_dum = {}
 
-dummy_clf = smote_pip_skfold(X_train, y_train, dum, 'Dummy_clf')
-
-
-# ## Logistic Regression with Grid Search & SMOTE
-
-# ### Hyper parameters tuning
-
-# In[10]:
-
-
-# Hyper parameters tuning with Grid Search & SMOTE method
-
-# Define SMOTE version of the dataset
-oversample_model = SMOTE(sampling_strategy = 'auto', 
-                         k_neighbors = 5)
-
-# Define a pipeline that first transform training with SMOTE set then fits the model
-steps = [('oversample', oversample_model), 
-         ('model', LogisticRegression())]
-pipeline = Pipeline(steps = steps)
-
-# Define cross validation method
-cv = RepeatedStratifiedKFold(n_splits = 5, 
-                             n_repeats = 3, 
-                             random_state = rs)
-
-# Define Grid search method
-grid = {"model__C" : [0.01, 0.1, 1, 10, 100], 
-        "model__penalty" : ["l1","l2"]}
-
-logreg_cv = GridSearchCV(pipeline, 
-                         grid, 
-                         cv = cv)
-logreg_cv.fit(X_train,y_train)
-
-best_C = logreg_cv.best_params_['model__C']
-best_pen = logreg_cv.best_params_['model__penalty']
-
-print("Best parameters : C = {}, penalty = {} ".format(best_C, best_pen))
-
-
-# In[11]:
-
-
-# best_params_LR = pd.DataFrame(data = {'C' : best_C, 
-#                                       'Penalty' : best_pen}, 
-#                               index = ['LR'])
-# best_params_LR.to_csv('best_params_LR.csv')
-
-
-# ### Model application
-
-# In[50]:
-
-
-best_params_LR = pd.read_csv('best_params_LR.csv')
-best_C = int(best_params_LR['C'][0])
-best_pen = best_params_LR['Penalty'][0]
-best_params_LR
+best_dum = model_app_train(X_train, y_train, dum, 'Dummy_clf', grid = grid_dum, class_imb = 'CW', ybot = 0, ytop = 1)
 
 
 # In[36]:
 
 
-# Model with SMOTE method and best parameters
-
-# Model definition
-lr = LogisticRegression(max_iter = 100, 
-                         C = best_C, 
-                         penalty = best_pen)
-
-LR_clf = smote_pip_skfold(X_train, y_train, lr, 'LR_clf')
+pred_dum = predict(best_dum, 'Dummy_clf', X_test, y_test, average_recall = 'weighted', average_prec = 'weighted')
+pred_dum.to_csv('dum_score.csv')
 
 
-# In[35]:
+# ## Logistic Regression
+
+# In[37]:
 
 
-y_pred, y_test = evaluate_model(lr)
-plot_confusion_matrix(y_pred, y_test)
-plt.savefig('cm_lr.png')
+logreg = LogisticRegression(class_weight = 'balanced')
 
+grid_lr = {"model__C" : [0.001, 0.01, 0.1, 1, 10, 100], 
+        "model__penalty" : ["l1","l2"]}
 
-# ## Random Forest Classifier with Grid Search
+logreg_cv = model_app_train(X_train, y_train, logreg, 'LR_clf', grid = grid_lr, class_imb = 'CW', ybot = 0, ytop = 1,
+                           n_fold = 5, n_fold_repeats = 1)
 
-# ### N estimator tuning
 
 # In[38]:
 
 
-# # Hyper parameters tuning (tree number n)
-# min_estimators = 1
-# max_estimators = 100
-# n_estimators = [i for i in range(min_estimators, max_estimators+1, 10)]
-# best_n = pd.DataFrame()
-
-# # Define SMOTE version of the dataset
-# oversample_model = SMOTE(sampling_strategy = 'auto', 
-#                          k_neighbors = 5)
-
-# # Define a pipeline that first transform training with SMOTE set then fits the model
-# forest = RandomForestClassifier(warm_start = False, 
-#                                 oob_score = True,
-#                                 max_features = 'sqrt', 
-#                                 random_state = rs)
-# steps = [('oversample', oversample_model), 
-#          ('model', forest)]
-# pipeline = Pipeline(steps = steps)
+pred_logreg = predict(logreg_cv, 'LR_clf', X_test, y_test)
+pred_logreg.to_csv('LR_score.csv')
 
 
-# # OOb error as a function of tree number n
-# oob_error = pd.DataFrame(columns = ['n','oob'])    
-# for i in n_estimators:
-#     forest.set_params(n_estimators = i)
-#     #forest.fit(X_train, y_train)
-#     pipeline.fit(X_train, y_train)
-#     d = {'n' : i,'oob' : 1 - forest.oob_score_}
-#     oob_error = oob_error.append(d, ignore_index = True)
-        
-# best_n = best_n.append(oob_error.max(), ignore_index = True)
+# ## Random Forest Classifier 
 
-# plt.figure(figsize = (12,10))
-# ax = plt.axes()
-# ax.set_ylim(0, 1)
-            
-# plt.plot(oob_error['n'], oob_error['oob'])
-# plt.title(('oob error '), fontsize = 20)
-# plt.xticks(fontsize = 15)
-# plt.yticks(fontsize = 15)
-# plt.xlabel("n_estimators", fontsize = 20)
-# plt.ylabel("OOB error rate", fontsize = 20)
-# plt.show()
-
-# plt.savefig('oob_error.png')
+# In[56]:
 
 
-# ### Hyper parameter tuning
-
-# In[40]:
-
-
-# # Hyper parameters tuning with Grid Search & SMOTE method
-
-# # Define SMOTE version of the dataset
-# oversample_model = SMOTE(sampling_strategy = 'auto', 
-#                          k_neighbors = 5)
-
-# # Define a pipeline that first transform training with SMOTE set then fits the model
-# RFC = RandomForestClassifier(max_features = 'sqrt', 
-#                              oob_score = True, 
-#                              random_state = rs)
-# steps = [('oversample', oversample_model), 
-#          ('model', RFC)]
-# pipeline = Pipeline(steps = steps)
-
-# n_var = X_train.shape[1]
-# best_params = pd.DataFrame()
-
-# # Define cross validation method
-# cv = RepeatedStratifiedKFold(n_splits = 5, 
-#                              n_repeats = 3, 
-#                              random_state = rs)
-
-# # Define Grid search method
-# param_grid = {
-#     'model__n_estimators' : [5, 10, 30, 60, 80],
-#     'model__min_samples_leaf' : [5, 10, 50],
-#     'model__max_depth': [int(n_var/2), int(n_var/3), int(n_var/4)]
-# }
-# RFC_cv = GridSearchCV(pipeline, 
-#                       param_grid = param_grid,
-#                       cv = cv)
-# RFC_cv.fit(X_train, y_train)
-
-# best_n = RFC_cv.best_params_['model__n_estimators']
-# best_msl = RFC_cv.best_params_['model__min_samples_leaf']
-# best_md = RFC_cv.best_params_['model__max_depth']
-
-# print("Best parameters : n = {}, min_samples_leaf = {}, max_depth = {} ".format(best_n, best_msl, best_md))
-
-
-# In[41]:
-
-
-# best_params_RF = pd.DataFrame(data = {'n' : best_n, 
-#                                      'min_samples_leaf' : best_msl,
-#                                      'max_depth' : best_md}, 
-#                               index = ['RF'])
-# best_params_RF.to_csv('best_params_RF.csv')
-
-
-# ### Model application
-
-# In[45]:
-
-
-best_params_RF = pd.read_csv('best_params_RF.csv')
-best_n = int(best_params_RF['n'][0])
-best_msl = best_params_RF['min_samples_leaf'][0]
-best_md = best_params_RF['max_depth'][0]
-best_params_RF
-
-
-# In[49]:
-
-
-# Model definition
-RF = RandomForestClassifier(max_depth = best_md,
-                            min_samples_leaf = best_msl,
-                            n_estimators = best_n,
-                            random_state = rs)
-
-RF_clf = smote_pip_skfold(X_train, y_train, RF, 'RF_clf')
-
-
-# ## XGBoost
-
-# ### Hyper parameters tuning
-
-# In[ ]:
-
-
-# Hyper parameters tuning with Grid Search & SMOTE method
-
-# Define SMOTE version of the dataset
-oversample_model = SMOTE(sampling_strategy = 'auto', 
-                         k_neighbors = 5)
+# Hyper parameters tuning (tree number n)
+min_estimators = 1
+max_estimators = 100
+n_estimators = [i for i in range(min_estimators, max_estimators+1, 10)]
+best_n = pd.DataFrame()
 
 # Define a pipeline that first transform training with SMOTE set then fits the model
-steps = [('oversample', oversample_model), 
-         ('model', XGBClassifier())]
-pipeline = Pipeline(steps = steps)
+forest = RandomForestClassifier(warm_start = False, 
+                                oob_score = True,
+                                max_features = 'sqrt', 
+                                random_state = rs,
+                                class_weight = 'balanced')
 
-# Define cross validation method
-cv = RepeatedStratifiedKFold(n_splits = 5, 
-                             n_repeats = 1, 
-                             random_state = rs)
+# OOb error as a function of tree number n
+oob_error = pd.DataFrame(columns = ['n','oob'])    
+for i in n_estimators:
+    forest.set_params(n_estimators = i)
+    forest.fit(X_train, y_train)
+    d = {'n' : i,'oob' : 1 - forest.oob_score_}
+    oob_error = oob_error.append(d, ignore_index = True)
+        
+best_n = best_n.append(oob_error.max(), ignore_index = True)
 
-# Define Grid search method
-grid = {
-        'model__min_child_weights': [1, 5, 10],
-        'n_estimators' = [10, 50, 100]
-#         'gamma': [0.5, 1, 1.5, 2, 5],
-#         'model__subsample': [0.6, 0.8, 1.0],
-#         'colsample_bytree': [0.6, 0.8, 1.0],
-        'model__max_depth': [3, 4, 5]
-       }
+plt.figure(figsize = (12,10))
+ax = plt.axes()
+ax.set_ylim(0, 1)
+            
+plt.plot(oob_error['n'], oob_error['oob'])
+plt.title(('oob error '), fontsize = 20)
+plt.xticks(fontsize = 15)
+plt.yticks(fontsize = 15)
+plt.xlabel("n_estimators", fontsize = 20)
+plt.ylabel("OOB error rate", fontsize = 20)
+plt.show()
 
-xgb_cv = GridSearchCV(pipeline, 
-                      grid, 
-                      cv = cv)
-
-xgb_cv.fit(X_train,y_train)
-
-best_mcw = xgb_cv.best_params_['model__min_child_weights']
-best_subsamp = xgb_cv.best_params_['model__subsample']
-best_md = xgb_cv.best_params_['model__max_depth']
-
-print("Best parameters : min_child_weights = {}, subsample = {}, max_depth = {} ".format(
-    best_mcw, best_subsamp, best_md))
+plt.savefig('oob_error.png')
+plt.show()
 
 
 # In[ ]:
 
 
-best_params_xgb = pd.DataFrame(data = {}, 
-                              index = ['XGB'])
-best_params_xgb.to_csv('best_params_RF.csv')
+n_var = X_train.shape[1]
+forest = RandomForestClassifier(warm_start = False, 
+                                oob_score = True,
+                                max_features = 'sqrt', 
+                                random_state = rs,
+                                class_weight = 'balanced')
+grid_RF = {
+    'model__n_estimators' : [50, 70, 90],
+    'model__min_samples_leaf' : [2, 5, 10],
+    'model__max_depth': [int(n_var/2), int(n_var/3), int(n_var/4)]
+}
 
+best_RF = model_app_train(X_train, y_train, forest, 'RF_clf', grid = grid_RF, class_imb = 'CW', ybot = 0, ytop = 1,
+                         n_fold = 5, n_fold_repeats = 1)
 
-# ### Model Application
 
 # In[ ]:
 
 
-best_params_xgb = pd.read_csv('best_params_xgb.csv')
-
-
-best_params_xgb
-
-
-# In[48]:
-
-
-# Model definition
-
-# xgb = XGBClassifier(
-#     n_estimators = best_n
-#     min_child_weights = best_mcw,
-#     subsample = best_subsamp,
-#     max_depth = best_md
-# )
-
-xgb = XGBClassifier()
-    
-xgb_clf = smote_pip_skfold(X_train, y_train, xgb, 'LGBM_clf')
+pred_RF = predict(best_RF, 'RF_clf', X_test, y_test)
+pred_RF.to_csv('RF_score.csv')
 
 
 # # Conclusion
 
-# In[47]:
+# In[ ]:
 
 
-# clf_results = pd.concat([dummy_clf, LR_clf, RF_clf], axis = 0)
-# clf_results.to_csv('results_clf.csv')
+clf_results = pd.concat([pred_dum, pred_LR, pred_RF], axis = 0)
+clf_results.to_csv('results_clf.csv')
 
-clf_results = pd.read_csv('results_clf.csv', index_col = 'Unnamed: 0')
+# clf_results = pd.read_csv('results_clf.csv', index_col = 'Unnamed: 0')
 clf_results.style.highlight_max(color = 'red', axis = 0).set_precision(2)
 
 

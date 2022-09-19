@@ -15,7 +15,10 @@ import gc
 from contextlib import contextmanager
 from lightgbm import LGBMClassifier
 from sklearn.metrics import roc_auc_score, roc_curve
-from sklearn.model_selection import KFold, StratifiedKFold
+from sklearn.model_selection import KFold, StratifiedKFold, train_test_split
+
+from sklearn.preprocessing import MinMaxScaler
+from scipy.stats import pearsonr
 
 import warnings
 warnings.simplefilter(action ='ignore', category = FutureWarning) 
@@ -27,31 +30,39 @@ warnings.simplefilter(action ='ignore', category = FutureWarning)
 
 
 path = 'C:/Users/pgron/Jupyter/P7/data/'
+rs = 42
 
 # Main table, broken into two files for Train (with TARGET) and Test (without TARGET).
-app_test = pd.read_csv(path + 'application_test.csv', nrows = None)
+app_test = pd.read_csv(path + 'application_test.csv', nrows = None) #not used
 app_train = pd.read_csv(path + 'application_train.csv', nrows = None)
+appli_train, appli_test = train_test_split(app_train, test_size = 0.20)
 
 # All client's previous credits provided by other financial institutions that were reported to Credit Bureau
 # For every loan in our sample, there are as many rows as number of credits the client had in Credit Bureau 
 # before the application date.
-df_bureau = pd.read_csv(path + 'bureau.csv', nrows = None) 
+df_bureau = pd.read_csv(path + 'bureau.csv', nrows = None)
+bureau_train, bureau_test = train_test_split(df_bureau, test_size = 0.20, random_state = rs)
 
 # Monthly balances of previous credits in Credit Bureau.
 bb = pd.read_csv(path + 'bureau_balance.csv', nrows = None)
+bb_train, bb_test = train_test_split(bb, test_size = 0.20, random_state = rs)
 
 # Monthly balance snapshots of previous POS (point of sales) and cash loans that the applicant had with Home Credit
 df_pos_cash = pd.read_csv(path + 'POS_CASH_balance.csv', nrows = None)
+pos_train, pos_test = train_test_split(df_pos_cash, test_size = 0.20, random_state = rs)
 
 # Monthly balance snapshots of previous credit cards that the applicant has with Home Credit.
 credit_card = pd.read_csv(path + 'credit_card_balance.csv', nrows = None)
+cc_train, cc_test = train_test_split(credit_card, test_size = 0.20, random_state = rs)
 
 # All previous applications for Home Credit loans of clients who have loans in our sample.
 prev_app = pd.read_csv(path + 'previous_application.csv', nrows = None)
+prev_train, prev_test = train_test_split(prev_app, test_size = 0.20, random_state = rs)
 
 # Repayment history for the previously disbursed credits in Home Credit related to the loans in our sample.
 # There is a) one row for every payment that was made plus b) one row each for missed payment.
 inst_pay = pd.read_csv(path + 'installments_payments.csv', nrows = None)
+inst_train, inst_test = train_test_split(inst_pay, test_size = 0.20, random_state = rs)
 
 
 # In[3]:
@@ -116,14 +127,7 @@ def one_hot_encoder(df, nan_as_category = True):
 
 
 # Preprocess application_train.csv and application_test.csv
-def application_train_test(app_train, app_test, num_rows = None, nan_as_category = False):
-    
-    # Read data and merge
-    print("Train samples: {}, test samples: {}".format(len(app_train), len(app_test)))
-    df = pd.concat([app_train, app_test], axis = 0).reset_index()
-    
-    # Optional: Remove 4 applications with XNA CODE_GENDER (train set)
-    #df = df[df['CODE_GENDER'] != 'XNA']
+def application_train_test(df, num_rows = None, nan_as_category = False):
     
     # Categorical features with Binary encode (0 or 1; two categories)
     for bin_feature in ['CODE_GENDER', 'FLAG_OWN_CAR', 'FLAG_OWN_REALTY']:
@@ -153,10 +157,10 @@ def application_train_test(app_train, app_test, num_rows = None, nan_as_category
 
 
 # Preprocess bureau.csv and bureau_balance.csv
-def bureau_and_balance(df_bureau, bb, num_rows = None, nan_as_category = True):
+def bureau_and_balance(df_1, df_2, num_rows = None, nan_as_category = True):
 
-    bb, bb_cat = one_hot_encoder(bb, nan_as_category)
-    bureau, bureau_cat = one_hot_encoder(df_bureau, nan_as_category)
+    bb, bb_cat = one_hot_encoder(df_2, nan_as_category)
+    bureau, bureau_cat = one_hot_encoder(df_1, nan_as_category)
     
     # Bureau balance: Perform aggregations and merge with bureau.csv
     bb_aggregations = {'MONTHS_BALANCE': ['min', 'max', 'size']}
@@ -241,9 +245,9 @@ def bureau_and_balance(df_bureau, bb, num_rows = None, nan_as_category = True):
 
 
 # Preprocess previous_applications.csv
-def previous_applications(prev_app, num_rows = None, nan_as_category = True):
+def previous_applications(df, num_rows = None, nan_as_category = True):
     
-    prev, cat_cols = one_hot_encoder(prev_app, nan_as_category= True)
+    prev, cat_cols = one_hot_encoder(df, nan_as_category= True)
     
     # Days 365.243 values -> nan
     prev['DAYS_FIRST_DRAWING'].replace(365243, np.nan, inplace= True)
@@ -284,7 +288,7 @@ def previous_applications(prev_app, num_rows = None, nan_as_category = True):
     approved_agg = approved.groupby('SK_ID_CURR').agg(num_aggregations)
     approved_agg.columns = pd.Index(['APPROVED_' + e[0] + "_" + e[1].upper() for e in approved_agg.columns.tolist()])
     
-    prev_agg = prev_agg.join(approved_agg, how='left', on='SK_ID_CURR')
+    prev_agg = prev_agg.join(approved_agg, how ='left', on='SK_ID_CURR')
     
     # Previous Applications: Refused Applications - only numerical features
     refused = prev[prev['NAME_CONTRACT_STATUS_Refused'] == 1]
@@ -292,7 +296,7 @@ def previous_applications(prev_app, num_rows = None, nan_as_category = True):
     refused_agg = refused.groupby('SK_ID_CURR').agg(num_aggregations)
     refused_agg.columns = pd.Index(['REFUSED_' + e[0] + "_" + e[1].upper() for e in refused_agg.columns.tolist()])
     
-    prev_agg = prev_agg.join(refused_agg, how='left', on='SK_ID_CURR')
+    prev_agg = prev_agg.join(refused_agg, how = 'left', on = 'SK_ID_CURR')
     
     del refused, refused_agg, approved, approved_agg, prev
     
@@ -305,9 +309,9 @@ def previous_applications(prev_app, num_rows = None, nan_as_category = True):
 
 
 # Preprocess POS_CASH_balance.csv
-def pos_cash(df_pos_cash, num_rows = None, nan_as_category = True):
+def pos_cash(df, num_rows = None, nan_as_category = True):
     
-    pos, cat_cols = one_hot_encoder(df_pos_cash, nan_as_category= True)
+    pos, cat_cols = one_hot_encoder(df, nan_as_category= True)
     
     # Features
     aggregations = {
@@ -336,9 +340,9 @@ def pos_cash(df_pos_cash, num_rows = None, nan_as_category = True):
 
 
 # Preprocess installments_payments.csv
-def installments_payments(inst_pay, num_rows = None, nan_as_category = True):
+def installments_payments(df, num_rows = None, nan_as_category = True):
 
-    ins, cat_cols = one_hot_encoder(inst_pay, nan_as_category= True)
+    ins, cat_cols = one_hot_encoder(df, nan_as_category= True)
     
     # Percentage and difference paid in each installment (amount paid and installment value)
     ins['PAYMENT_PERC'] = ins['AMT_PAYMENT'] / ins['AMT_INSTALMENT']
@@ -383,9 +387,9 @@ def installments_payments(inst_pay, num_rows = None, nan_as_category = True):
 
 
 # Preprocess credit_card_balance.csv
-def credit_card_balance(credit_card, num_rows = None, nan_as_category = True):
+def credit_card_balance(df, num_rows = None, nan_as_category = True):
     
-    cc, cat_cols = one_hot_encoder(credit_card, nan_as_category= True)
+    cc, cat_cols = one_hot_encoder(df, nan_as_category= True)
     
     # General aggregations
     cc.drop(['SK_ID_PREV'], axis = 1, inplace = True)
@@ -457,12 +461,76 @@ def main(debug = False):
 # In[13]:
 
 
+# Join all df together after aggregation
+def main_train_test(debug = False):
+    
+    num_rows = 10000 if debug else None
+    
+    df_train = application_train_test(appli_train, num_rows)
+    df_test = application_train_test(appli_test, num_rows)
+    
+    with timer("Process bureau and bureau_balance"):
+        bur_train = bureau_and_balance(bureau_train, bb_train, num_rows)
+        bur_test = bureau_and_balance(bureau_test, bb_test, num_rows)
+        
+        df_train = df_train.join(bur_train, how = 'left', on = 'SK_ID_CURR')
+        df_test = df_test.join(bur_test, how = 'left', on = 'SK_ID_CURR')
+
+        del bur_train, bur_test
+        gc.collect()
+        
+    with timer("Process previous_applications"):
+        prev_app_train = previous_applications(prev_train, num_rows)
+        prev_app_test = previous_applications(prev_test, num_rows)
+
+        df_train = df_train.join(prev_app_train, how = 'left', on = 'SK_ID_CURR')
+        df_test = df_test.join(prev_app_test, how = 'left', on = 'SK_ID_CURR')
+
+        del prev_app_train, prev_app_test
+        gc.collect()
+        
+    with timer("Process POS-CASH balance"):
+        pos_cash_train = pos_cash(pos_train, num_rows)
+        pos_cash_test = pos_cash(pos_train, num_rows)
+
+        df_train = df_train.join(pos_cash_train, how = 'left', on = 'SK_ID_CURR')
+        df_test = df_test.join(pos_cash_test, how = 'left', on = 'SK_ID_CURR')
+
+        del pos_cash_train, pos_cash_test
+        gc.collect()
+        
+    with timer("Process installments payments"):
+        ins_train = installments_payments(inst_train, num_rows)
+        ins_test = installments_payments(inst_test, num_rows)
+
+        df_train = df_train.join(ins_train, how = 'left', on = 'SK_ID_CURR')
+        df_test = df_test.join(ins_test, how = 'left', on = 'SK_ID_CURR')
+
+        del ins_train, ins_test
+        gc.collect()
+        
+    with timer("Process credit card balance"):
+        ccb_train = credit_card_balance(cc_train, num_rows)
+        ccb_test = credit_card_balance(cc_test, num_rows)
+
+        df_train = df_train.join(ccb_train, how = 'left', on = 'SK_ID_CURR')
+        df_test = df_test.join(ccb_test, how = 'left', on = 'SK_ID_CURR')
+
+        del ccb_train, ccb_test
+        gc.collect()
+        
+    return df_train, df_test
+
+
+# In[14]:
+
+
 def def_pd(df, df_name) : #function to explore dataset
     
     #STRUCTURE
     display(df.info())
-    print('--- Unique values ---')
-    display(df.nunique())
+    #print('--- Unique values ---')
+    #display(df.nunique())
     
     #NaN
     #Calcul du pct de valeurs manquantes total
@@ -482,17 +550,17 @@ def def_pd(df, df_name) : #function to explore dataset
     nb_na_var = df.isnull().mean()
     pct_remplissage_var = pd.DataFrame((100 - (nb_na_var*100)).astype(int), 
                                         columns = ['Pourcentage de remplissage (%)'])
-    print('   ')
-    display(pct_remplissage_var)
-    print('   ')
+    #print('   ')
+    #display(pct_remplissage_var)
+    #print('   ')
 
     #Calcul du pourcentage de valeurs manquantes par individus
     nb_na_ind = df.isnull().mean(axis = 1)
     pct_remplissage_ind = pd.DataFrame((100 - (nb_na_ind*100)).astype(int), 
                                         columns = ['Pourcentage de remplissage (%)'])   
-    print('   ')
-    display(pct_remplissage_ind)
-    print('   ')
+    #print('   ')
+    #display(pct_remplissage_ind)
+    #print('   ')
 
     
     #DOUBLONS
@@ -512,7 +580,7 @@ def def_pd(df, df_name) : #function to explore dataset
     return pct_remplissage_var, pct_remplissage_ind
 
 
-# In[14]:
+# In[15]:
 
 
 def pie(df, var, lim):
@@ -522,11 +590,11 @@ def pie(df, var, lim):
     df_plot = df_plot.rename(columns = {var :'Frequence' })
     df_plot_1 = df_plot.loc[df_plot['Frequence'] > lim]
     
-    plot = df_plot_1.plot(kind='pie', y = 'Frequence', autopct ='%1.0f%%', figsize=(10, 10), 
+    plot = df_plot_1.plot(kind = 'pie', y = 'Frequence', autopct = '%1.0f%%', figsize = (10, 10), 
                           fontsize = 25, legend = False, labeldistance = 1.1)
                                                      
 
-    plot.set_title(var,fontsize = 40)
+    plot.set_title(var, fontsize = 40)
     plt.title(var,fontsize = 30)
     plt.xlabel('')
     plt.ylabel('')
@@ -541,16 +609,39 @@ def pie(df, var, lim):
 
 # ## Function application 
 
-# In[15]:
-
-
-df = main()
-df.head(3)
-
-
 # In[16]:
 
 
+df_train, df_test = main_train_test()
+print(df_train.shape)
+print(df_test.shape)
+
+
+# In[17]:
+
+
+list_col_train = df_train.columns
+list_col_test = df_test.columns
+drop_list = []
+
+for col in list_col_train : 
+    if col not in list_col_test : 
+        drop_list.append(col)
+        
+drop_list
+
+
+# In[19]:
+
+
+df_train = df_train.drop(drop_list, axis = 1)
+df_train.shape
+
+
+# In[20]:
+
+
+df = pd.concat([df_train, df_test], axis = 0)
 pie(df, 'TARGET', lim = 0)
 
 
@@ -559,54 +650,119 @@ pie(df, 'TARGET', lim = 0)
 # In[21]:
 
 
-lim_var = 50
-
-# Variables importantes
+# Check if there's infinite values
 feats = [f for f in df.columns if f not in ['TARGET','SK_ID_CURR','SK_ID_BUREAU','SK_ID_PREV','index']]
-pct_var, pct_ind = def_pd(df[feats], 'main')
-
-# On sépare les variables remplies des autres
-var_keep = pct_var.loc[pct_var['Pourcentage de remplissage (%)'] > lim_var]
-var_drop = pct_var.loc[pct_var['Pourcentage de remplissage (%)'] < lim_var]
-
-pct_keep = round((len(var_keep.index)/len(df.columns))*100, 2)
-pct_drop = round((len(var_drop.index)/len(df.columns))*100, 2)
-
-print('On garde ', len(var_keep.index), ' variables ({} %).'.format(pct_keep))
-print('On retire ', len(var_drop.index), ' variables ({} %).'.format(pct_drop))
+print(np.all(np.isfinite(df_train[feats])))
+print(np.all(np.isfinite(df_test[feats])))
 
 
 # In[22]:
 
 
-# On retire les variables trop peut remplies
-df = df.drop(var_drop.index, axis = 1)
+# Replace infinite values with nan values
+df_train = df_train.replace([np.inf, -np.inf], np.nan)
+df_test = df_test.replace([np.inf, -np.inf], np.nan)
 
-# On traite les valeurs manquantes des variables restantes 
-feats = [f for f in df.columns if f not in ['TARGET','SK_ID_CURR','SK_ID_BUREAU','SK_ID_PREV','index']]
-for col in feats :
-    med = df[col].median()
-    df[col] = df[col].fillna(med)
-    
-def_pd(df[feats], 'data')
+
+# In[23]:
+
+
+# Train/Test details
+pct_var_train, pct_ind_train = def_pd(df_train[feats], 'Train')
+pct_var_test, pct_ind_test = def_pd(df_test[feats], 'Test')
+
+
+# In[24]:
+
+
+lim_var = 50
+
+# On sépare les variables remplies des autres
+var_keep_train = pct_var_train.loc[pct_var_train['Pourcentage de remplissage (%)'] > lim_var]
+var_drop_train = pct_var_train.loc[pct_var_train['Pourcentage de remplissage (%)'] < lim_var]
+
+# var_keep_test = pct_var_test.loc[pct_var_test['Pourcentage de remplissage (%)'] > lim_var]
+# var_drop_test = pct_var_test.loc[pct_var_test['Pourcentage de remplissage (%)'] < lim_var]
+
+pct_keep_train = round((len(var_keep_train.index)/len(df_train.columns))*100, 2)
+pct_drop_train = round((len(var_drop_train.index)/len(df_train.columns))*100, 2)
+
+# pct_keep_test = round((len(var_keep_test.index)/len(df_test.columns))*100, 2)
+# pct_drop_test = round((len(var_drop_test.index)/len(df_test.columns))*100, 2)
+
+print('TRAIN')
+print('On garde ', len(var_keep_train.index), ' variables ({} %).'.format(pct_keep_train))
+print('On retire ', len(var_drop_train.index), ' variables ({} %).'.format(pct_drop_train))
+print('  ')
+# print('TEST')
+# print('On garde ', len(var_keep_test.index), ' variables ({} %).'.format(pct_keep_test))
+# print('On retire ', len(var_drop_test.index), ' variables ({} %).'.format(pct_drop_test))
 
 
 # In[25]:
 
 
-np.all(np.isfinite(df[feats]))
+# On retire les variables trop peut remplies dans train/test
+df_train = df_train.drop(var_drop_train.index, axis = 1)
+df_test = df_test.drop(var_drop_train.index, axis = 1)
 
 
-# In[ ]:
+# In[26]:
 
 
-np.all(np.isnan(df[feats]))
+# On traite les valeurs manquantes des variables restantes 
+feats = [f for f in df_train.columns if f not in ['TARGET','SK_ID_CURR','SK_ID_BUREAU','SK_ID_PREV','index']]
+
+for col in feats :
+    med_train = df_train[col].median()
+    df_train[col] = df_train[col].fillna(med_train)
+    
+    df_test[col] = df_test[col].fillna(med_train)
+    
+def_pd(df_train[feats], 'Train')
+def_pd(df_test[feats], 'Test')
 
 
 # In[27]:
 
 
-df.to_csv('data_clean.csv')
+scaler = MinMaxScaler()
+df_train = pd.DataFrame(data = scaler.fit_transform(df_train), 
+                        columns = df_train.columns, index = df_train.index)
+
+df_test = pd.DataFrame(data = scaler.transform(df_test), 
+                        columns = df_test.columns, index = df_test.index)
+
+
+# In[28]:
+
+
+# Infinite values check
+print(np.all(np.isfinite(df_train[feats])))
+print(np.all(np.isfinite(df_test[feats])))
+
+#NaN values check
+print(np.all(np.isnan(df_train[feats])))
+print(np.all(np.isnan(df_test[feats])))
+
+
+# In[29]:
+
+
+df_train.to_csv('df_train.csv')
+df_test.to_csv('df_test.csv')
+
+
+# In[30]:
+
+
+df_train.he
+
+
+# In[ ]:
+
+
+
 
 
 # In[ ]:
