@@ -10,6 +10,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import csv
+import dill as pickle
+import json
 
 import gc
 from contextlib import contextmanager
@@ -199,7 +201,7 @@ def pie(df, var, lim):
     display(pct)
 
 
-# In[54]:
+# In[7]:
 
 
 # Display feature importance
@@ -207,7 +209,8 @@ def feat_importance(model_name, model):
     
     if model_name == 'LR_clf' :
         coef = model.coef_
-        feat_imp = pd.DataFrame(data = {'Features' : feats, 'Importance' : coef[0]})
+        coef_global = {'Features' : feats, 'Importance' : coef[0].tolist()}
+        feat_imp = pd.DataFrame(data = coef_global)
         
         feat_imp.sort_values('Importance', key = abs, ascending = False, inplace = True)
         plt.figure(figsize = (10,10))
@@ -223,6 +226,8 @@ def feat_importance(model_name, model):
         plt.title('Feature Importance {}'.format(model_name), fontsize = 20)
         plt.savefig('feat_imp_{}.png'.format(model_name))
         plt.show()
+        
+        return coef_global
         
     if model_name == 'RF_clf' : 
         
@@ -327,6 +332,8 @@ def model_validation(model, model_name, X_valid, y_valid):
     
     if (model_name == 'LR_clf') or (model_name == 'RF_clf'):
         
+        y_score = model.predict_proba(X_valid)[:,1]
+        
         hist_fig = plt.figure(figsize = (10, 8))
         plt.hist(y_score, bins = 'auto')
         plt.title('Proba distribution', fontsize = 20)
@@ -337,9 +344,8 @@ def model_validation(model, model_name, X_valid, y_valid):
         plt.show()
         
         thres, max_F1 = f1_max(y_valid, y_pred, y_score, model_name)
-        y_proba = model.predict_proba(X_valid)
-        y_pred = [1 if y.max() > thres else 0 for y in y_proba]
-        y_pred_df = pd.DataFrame(data = y_pred, columns = ['TARGET'])
+        y_p = [1 if y > thres else 0 for y in y_score]
+        y_pred_df = pd.DataFrame(data = y_p, columns = ['TARGET'])
         pie(y_pred_df, 'TARGET', 0)
         
         return scores, thres, max_F1
@@ -352,7 +358,7 @@ def model_validation(model, model_name, X_valid, y_valid):
 
 # ## Dummy Classifier
 
-# In[57]:
+# In[10]:
 
 
 # Model definition
@@ -374,7 +380,7 @@ grid_LR = {"model__C" : [0.1, 1, 10, 100],
 LR_cv = model_GS(X_train, y_train, LR, 'LR_clf', grid = grid_LR, class_imb = 'CW')
 
 
-# In[61]:
+# In[10]:
 
 
 best_param_LR = pd.read_csv('best_params_LR_clf.csv')
@@ -384,45 +390,81 @@ best_pen = best_param_LR['model__penalty'][0]
 LR_cv = LogisticRegression(class_weight = 'balanced', C = best_C, penalty = best_pen)
 LR_cv.fit(X_train, y_train)
 
-feat_importance('LR_clf', LR_cv)
+LR_coef_global = feat_importance('LR_clf', LR_cv)
 
 score_LR, thres_LR, max_F1_LR = model_validation(LR_cv, 'LR_clf', X_valid, y_valid)
 
 
-# In[15]:
+# In[46]:
 
 
 LR_explainer = lime.lime_tabular.LimeTabularExplainer(X_valid.values,
                                                       mode = 'classification', 
                                                       feature_names = feats,
-                                                      class_names  = list(y_valid.unique()),
+                                                      class_names  = ['Rejetée', 'Acceptée'],
                                                       random_state = rs
                                                       )
+
+
+# In[67]:
+
+
+idx = random.randint(1, len(X_valid))
+
+print("Prediction : ", 
+      "Rejetée" if LR_cv.predict_proba(X_valid.values[idx].reshape(1,-1))[:,1] > thres_LR else 'Acceptée')
+print("Actual :     ", "Rejetée" if y_valid.iloc[idx] == 1 else 'Acceptée')
+
+LR_explanation = LR_explainer.explain_instance(X_valid.values[idx],
+                                               LR_cv.predict_proba,
+                                               num_features = 10
+                                               )
+LR_explanation.show_in_notebook()
 
 
 # In[16]:
 
 
-idx = random.randint(1, len(X_valid))
-print('Demande de prêt : ', idx)
+def as_pyplot_figure(explanation, label = 1, figsize = (10,10)):
+    
+    """Returns the explanation as a pyplot figure.
+    Will throw an error if you don't have matplotlib installed
+    Args:
+        label: desired label. If you ask for a label for which an
+                explanation wasn't computed, will throw an exception.
+                Will be ignored for regression explanations.
+        figsize: desired size of pyplot in tuple format, defaults to (4,4).
+        kwargs: keyword arguments, passed to domain_mapper
+    Returns:
+        pyplot figure (barchart).
+     """
+    exp = explanation.as_list(label = label)
+    fig = plt.figure(figsize = figsize)
+    coefs = [x[1] for x in exp]
+    feats = [x[0] for x in exp]
+    coefs.reverse()
+    feats.reverse()
+    feats = [f.strip('<= 0.00 0.46') for f in feats]
+    colors = ['blue' if x > 0 else 'red' for x in coefs]
+    pos = np.arange(len(exp)) + .5
+    plt.barh(pos, coefs, align = 'center', color = colors)
+    plt.yticks(pos, feats, fontsize = 15)
+    plt.xticks(fontsize = 15)
+    
+    if explanation.mode == "classification":
+        title = 'Local explanation for class %s' % explanation.class_names[label]
+    else:
+        title = 'Local explanation'
+        
+    plt.title(title, fontsize = 20)
+    
+    return fig
 
-print("Prediction : ", 
-      "Accepté" if LR_cv.predict_proba(X_valid.values[idx].reshape(1,-1))[0].max() > thres_LR else 'Rejeté')
-print("Actual :     ", "Accepté" if y_valid.iloc[idx] == 0 else 'Rejeté')
 
-LR_explanation = LR_explainer.explain_instance(X_valid.values[idx],
-                                               LR_cv.predict_proba,
-                                               num_features = 10,
-                                               )
-LR_explanation.show_in_notebook()
+# In[69]:
 
 
-# In[17]:
-
-
-plt.rcParams["figure.figsize"] = [10,8]
-with plt.style.context("ggplot"):
-    LR_explanation.as_pyplot_figure()
+coef_loc = as_pyplot_figure(LR_explanation)
 
 
 # ## Random Forest Classifier 
@@ -496,37 +538,85 @@ RF_cv = model_GS(X_train, y_train, forest, 'RF_clf', grid = grid_RF, class_imb =
 # In[63]:
 
 
-# best_param_RF = pd.read_csv('best_params_RF_clf.csv')
-# best_n = int(best_param_RF['model__n_estimators'])
-# best_msl = float(best_param_RF['model__min_samples_leaf'])
-# best_md = int(best_param_RF['model__max_depth'])
+best_param_RF = pd.read_csv('best_params_RF_clf.csv')
+best_n = int(best_param_RF['model__n_estimators'])
+best_msl = float(best_param_RF['model__min_samples_leaf'])
+best_md = int(best_param_RF['model__max_depth'])
 
-# RF_best = RandomForestClassifier(max_depth = best_md,
-#                                  min_samples_leaf = best_msl,
-#                                  n_estimators = best_n,
-#                                  warm_start = False, 
-#                                  oob_score = True,
-#                                  max_features = 'sqrt', 
-#                                  random_state = rs,
-#                                  class_weight = 'balanced')
-# RF_best.fit(X_train, y_train)
+RF_cv = RandomForestClassifier(max_depth = best_md,
+                                 min_samples_leaf = best_msl,
+                                 n_estimators = best_n,
+                                 warm_start = False, 
+                                 oob_score = True,
+                                 max_features = 'sqrt', 
+                                 random_state = rs,
+                                 class_weight = 'balanced')
+RF_cv.fit(X_train, y_train)
 
-feat_importance('RF_clf', RF_cv.best_estimator_.named_steps['model'])
+feat_importance('RF_clf', RF_cv)
 
-score_RF, thres_RF, max_F1_RF = model_validation(RF_cv.best_estimator_.named_steps['model'], 
-                                                'RF_clf', X_valid, y_valid)
+score_RF, thres_RF, max_F1_RF = model_validation(RF_cv,'RF_clf', X_valid, y_valid)
 
 
 # # Conclusion
 
-# In[64]:
+# In[16]:
 
 
-clf_results = pd.concat([score_dum, score_LR, score_RF], axis = 0)
-clf_results.to_csv('results_clf.csv')
+# clf_results = pd.concat([score_dum, score_LR, score_RF], axis = 0)
+# clf_results.to_csv('results_clf.csv')
 
-# clf_results = pd.read_csv('results_clf.csv', index_col = 'Unnamed: 0')
+clf_results = pd.read_csv('results_clf.csv', index_col = 'Unnamed: 0')
 clf_results.style.highlight_max(color = 'red', axis = 0).set_precision(2)
+
+
+# Le modèle choisi est le modèle de régression logistique, montrant des performances proches de celle de la Random Forest, avec un temps de calcul plus court.
+# Les paramètres utiles pour la mise en place de L'API sont sauvés.
+
+# In[108]:
+
+
+# Save of best trained model
+best_param_LR = pd.read_csv('best_params_LR_clf.csv')
+best_C = float(best_param_LR['model__C'])
+best_pen = best_param_LR['model__penalty'][0]
+
+LR_clf = LogisticRegression(class_weight = 'balanced', C = best_C, penalty = best_pen)
+LR_clf.fit(X_train, y_train)
+
+filename = 'LR_clf.sav'
+pickle.dump(LR_clf, open(filename, 'wb'))
+
+
+# In[17]:
+
+
+#Save of best model threshold for max F1
+LR_params = {'Threshold': thres_LR}
+with open('LR_params.json', 'w', encoding='utf-8') as f:
+    json.dump(LR_params, f)
+
+
+# In[28]:
+
+
+#Save of best model global coef
+with open('LR_coef_global.json', 'w', encoding='utf-8') as f:
+    json.dump(LR_coef_global, f)
+
+
+# In[110]:
+
+
+#Save best model Lime explainer
+LR_explainer = lime.lime_tabular.LimeTabularExplainer(X_valid.values,
+                                                      mode = 'classification', 
+                                                      feature_names = feats,
+                                                      class_names  = ['Rejetée', 'Acceptée'],
+                                                      random_state = rs
+                                                      )
+
+pickle.dump(LR_explainer, open('LR_explainer.sav', 'wb'))
 
 
 # In[ ]:
