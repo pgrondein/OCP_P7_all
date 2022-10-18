@@ -8,13 +8,13 @@ Ce projet est découpé en trois parties.
 - dossier_code_prepa.py : préparation des données 
 - dossier_code_model.py : test de différents modèle de ML et choix du meilleur pour notre cas
     
-### 2. Partie API Flask 
+### 2. Partie API Flask (api_flask.py)
 - Hébergée par Heroku 
 - Dépôt Github disponible ici https://github.com/pgrondein/OCP_P7_heroku
 - Api visible ici https://apip7heroku.herokuapp.com/
 - Elle prend en entrée le numéro de demande de prêt et renvoie la probabilité pour la classe 1 (rejetée) ainsi que le statut de la demande.
 
-### 3. Partie Dashboard Streamlit 
+### 3. Partie Dashboard Streamlit (api_streamlit.py)
 - Hébergé par Streamlit share 
 - Dépôt Github disponible ici https://github.com/pgrondein/OCP_P7_streamlitshare
 - Dashboard visible ici https://pgrondein-ocp-p7-streamlitshare-api-streamlit-mbxmbt.streamlitapp.com/
