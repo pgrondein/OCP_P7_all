@@ -16,7 +16,7 @@ Ce projet est découpé en trois parties.
 
 ### 3. Partie Dashboard Streamlit 
 - Hébergé par Streamlit share 
-- Dépôt Github ici https://github.com/pgrondein/OCP_P7_streamlitshare
+- Dépôt Github disponible ici https://github.com/pgrondein/OCP_P7_streamlitshare
 - Dashboard visible ici https://pgrondein-ocp-p7-streamlitshare-api-streamlit-mbxmbt.streamlitapp.com/
 - Affiche différents éléments :
     - Choix d'un numéro de demande dans menu déroulant
