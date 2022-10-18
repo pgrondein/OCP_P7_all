@@ -5,8 +5,8 @@
 Ce projet est découpé en trois parties.
 
 ### 1. Partie préparation des données et modélisation
-    - dossier_code_prepa.py : préparation des données 
-    - dossier_code_model.py : test de différents modèle de ML et choix du meilleur pour notre cas
+- dossier_code_prepa.py : préparation des données 
+- dossier_code_model.py : test de différents modèle de ML et choix du meilleur pour notre cas
     
 ### 2. Partie API Flask 
     - Hébergée par Heroku 
