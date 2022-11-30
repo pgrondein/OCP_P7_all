@@ -27,3 +27,9 @@ Ce projet est découpé en trois parties.
     - Importance globale et locale des paramètres dans la décision du modèle
     - Positionnement de la demande par rapport à la distribution de la probabilité pour la classe 1 (rejetée)
                                                             
+## Compétences
+- Rédiger une note méthodologique afin de communiquer sa démarche de modélisation
+- Déployer un modèle via une API dans le Web
+- Utiliser un logiciel de version de code pour assurer l’intégration du modèle
+- Réaliser un dashboard pour présenter son travail de modélisation
+- Présenter son travail de modélisation à l'oral
