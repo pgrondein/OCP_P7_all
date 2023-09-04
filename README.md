@@ -84,13 +84,14 @@ Predictions can be categorized as follows:
 
 In our case, we understand that it is necessary to minimize False Negatives, and False Positives, particularly FNs. We then consider two criteria: Recall and Precision.
 
-![recall_prec](https://github.com/pgrondein/scoring_model_all/assets/113172845/63b6bf33-dbf5-474f-8125-e5e6cf928603)
+<img src="https://github.com/pgrondein/scoring_model_all/assets/113172845/63b6bf33-dbf5-474f-8125-e5e6cf928603" height="200">
 
 Both values must be maximized.
 
 To do this, we use the F1 Score function:
 
-![f1](https://github.com/pgrondein/scoring_model_all/assets/113172845/8eddc23e-be0b-41d9-a50f-45bf55e1977c)
+<img src="https://github.com/pgrondein/scoring_model_all/assets/113172845/8eddc23e-be0b-41d9-a50f-45bf55e1977c" height="200">
+
 
 This function is selected as a business cost function, and must be maximized.
 
@@ -139,7 +140,7 @@ The following features are implemented:
 - Visualization of descriptive information relating to a customer (via a filter system).
 - Possibility of comparing descriptive information relating to a customer to all customers or to a group of similar customers.
 
-<img src="https://github.com/pgrondein/scoring_model_all/assets/113172845/99cd26df-9fd8-40ff-8736-e3d128103218" height="400">
+<img src="https://github.com/pgrondein/scoring_model_all/assets/113172845/99cd26df-9fd8-40ff-8736-e3d128103218" height="200">
 
 The dashboard calls the API:
 
