@@ -84,13 +84,13 @@ Predictions can be categorized as follows:
 
 In our case, we understand that it is necessary to minimize False Negatives, and False Positives, particularly FNs. We then consider two criteria: Recall and Precision.
 
-<img src="https://github.com/pgrondein/scoring_model_all/assets/113172845/63b6bf33-dbf5-474f-8125-e5e6cf928603" height="200">
+<img src="https://github.com/pgrondein/scoring_model_all/assets/113172845/63b6bf33-dbf5-474f-8125-e5e6cf928603" height="100">
 
 Both values must be maximized.
 
 To do this, we use the F1 Score function:
 
-<img src="https://github.com/pgrondein/scoring_model_all/assets/113172845/8eddc23e-be0b-41d9-a50f-45bf55e1977c" height="200">
+<img src="https://github.com/pgrondein/scoring_model_all/assets/113172845/8eddc23e-be0b-41d9-a50f-45bf55e1977c" height="100">
 
 
 This function is selected as a business cost function, and must be maximized.
