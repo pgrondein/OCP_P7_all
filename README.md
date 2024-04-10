@@ -69,7 +69,7 @@ In order to compare the algorithms, the AUC is calculated. This is the indicator
 
 The Logistic Regression algorithm is selected.
 
-<img src="https://github.com/pgrondein/scoring_model_all/assets/113172845/dbb34f2f-a989-4b03-b173-8437d2d1c4d1" height="400">
+<img src="https://github.com/pgrondein/scoring_model_financial_company/assets/113172845/5abd7bcc-254e-4623-807f-010510ecea8b" height="400">
 
 ### Cost Function
 
@@ -88,7 +88,7 @@ In our case, we understand that it is necessary to minimize False Negatives, and
 
 Both values must be maximized.
 
-To do this, we use the F1 Score function:
+To do this, we use the Fbeta Score function, with beta = 1 so Recall and Precision have the same weight :
 
 <img src="https://github.com/pgrondein/scoring_model_all/assets/113172845/8eddc23e-be0b-41d9-a50f-45bf55e1977c" height="100">
 
@@ -97,14 +97,14 @@ This function is selected as a business cost function, and must be maximized.
 
 In order to determine the threshold for the logistic regression algorithm, we plot the F1 score as a function of the decision threshold of the classification algorithm.
 
-<img src="https://github.com/pgrondein/scoring_model_all/assets/113172845/28510d69-50d5-4f9f-9570-a769a4639074" height="400">
+<img src="https://github.com/pgrondein/scoring_model_financial_company/assets/113172845/03b98d28-439f-4ad9-9343-bb67a327f69a" height="400">
 
 We note that the score is maximized for a threshold of 0.67, therefore 67% probability of non-reimbursement.
 
 We define the decision thresholds for classes 1 (non-reimbursement) and 0 (reimbursement):
 
-- 1: 0.67
-- 0: 0.33
+- 1: 0.69
+- 0: 0.31
 
 ### Interpretability
 
@@ -116,11 +116,11 @@ We therefore plot in descending order the coefficients associated with each vari
 
 #### Global
 
-<img src="https://github.com/pgrondein/scoring_model_all/assets/113172845/c63b8722-acce-4579-b1f7-e86b6db5e95b" height="400">
+<img src="https://github.com/pgrondein/scoring_model_financial_company/assets/113172845/0fdd8f33-caa5-4d53-9b19-2c0ff1f760df" height="400">
 
 #### Local
 
-<img src="https://github.com/pgrondein/scoring_model_all/assets/113172845/4e75c76c-afa6-4245-b5f5-2291f4843a1f" height="400">
+<img src="https://github.com/pgrondein/scoring_model_financial_company/assets/113172845/321da8d9-6eb4-416c-a087-c90e18529277" height="400">
 
 ### API
 
