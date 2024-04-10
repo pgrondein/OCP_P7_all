@@ -1,6 +1,6 @@
 # Scoring Tool for Financial Company
 
-![banniere2](https://github.com/pgrondein/scoring_model_all/assets/113172845/e1fef848-67fc-487d-be3d-d2e50f9047c8)
+![banniere](https://github.com/pgrondein/scoring_model_financial_company/assets/113172845/1973f8de-2b96-4b86-9823-833ce17a70e3)
 
 ## Problem Definition
 
@@ -25,7 +25,7 @@ The data is available [here](https://www.kaggle.com/c/home-credit-default-risk/d
 ### Single feature analysis
 #### TARGET
 
-<img src="https://github.com/pgrondein/scoring_model_all/assets/113172845/c05bfcd4-834a-4b08-a2fb-870cdaf1c49a" height="400">
+<img src="https://github.com/pgrondein/scoring_model_financial_company/assets/113172845/7876f52b-9389-4813-8ffa-66b88ff98bb6" height="400">
 
 By observing the data from the training game, we see that it is unbalanced: we observe a large majority of class 0 (92%) compared to class 1 (8%). We are therefore faced with a Class Imbalance problem.
 
